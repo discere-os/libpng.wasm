@@ -1,0 +1,23 @@
+# act configuration for libpng.wasm local testing
+# See: https://github.com/nektos/act
+
+# Use specific container architecture 
+--container-architecture linux/amd64
+
+# Artifact server configuration
+--artifact-server-path ./act-artifacts
+
+# Use Node.js image for better compatibility with Emscripten
+-P ubuntu-latest=node:18-bullseye
+
+# Environment variables for local testing
+--env-file .env
+
+# Increase verbosity for debugging
+--verbose
+
+# Bind workspace for better performance
+--bind
+
+# Use specific platform for consistency
+--platform ubuntu-latest=catthehacker/ubuntu:act-latest

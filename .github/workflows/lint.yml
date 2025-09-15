@@ -1,14 +1,14 @@
-name: Linting libpng
+name: Linting libpng.wasm
 
 on:
   push:
     branches:
-      - libpng16
-      - libpng18
+      - wasm
+      - main
   pull_request:
     branches:
-      - libpng16
-      - libpng18
+      - wasm
+      - main
 
 jobs:
   lint:

@@ -1,0 +1,322 @@
+# CMakeLists.wasm.txt - WASM-specific CMake configuration for libpng.wasm
+#
+# This file provides WASM-optimized build configuration for libpng
+# with WASM SIMD optimizations and proper Emscripten integration.
+#
+
+cmake_minimum_required(VERSION 3.14...4.0)
+
+# WASM-specific project configuration
+project(libpng-wasm
+        VERSION 1.6.51
+        LANGUAGES C ASM)
+
+# Ensure we're building for Emscripten
+if(NOT EMSCRIPTEN)
+  message(FATAL_ERROR "This CMake file is specifically for Emscripten/WASM builds. Use regular CMakeLists.txt for other platforms.")
+endif()
+
+# Set WASM target architecture
+set(PNG_TARGET_ARCHITECTURE "wasm32")
+message(STATUS "Building libpng.wasm for WASM target architecture: ${PNG_TARGET_ARCHITECTURE}")
+
+# PRIORITY 1: Core Build Configuration
+# ===================================
+
+# Library build options - WASM optimized
+option(PNG_SHARED "Build libpng as a shared WASM library" OFF)  # Static preferred for WASM
+option(PNG_STATIC "Build libpng as a static WASM library" ON)
+option(PNG_FRAMEWORK "Build libpng as a framework bundle" OFF)  # Not applicable for WASM
+
+# Disable tools and tests for production WASM build
+option(PNG_TOOLS "Build the libpng tools" OFF)
+option(PNG_TESTS "Build the libpng tests" OFF)
+
+# PRIORITY 1: Disable All Native SIMD Optimizations
+# =================================================
+set(PNG_HARDWARE_OPTIMIZATIONS OFF CACHE BOOL "Disable all native hardware optimizations for WASM" FORCE)
+
+# Explicitly disable all native SIMD optimizations
+add_definitions(-DPNG_ARM_NEON_OPT=0)         # Disable ARM NEON
+add_definitions(-DPNG_INTEL_SSE_OPT=0)        # Disable Intel SSE
+add_definitions(-DPNG_POWERPC_VSX_OPT=0)      # Disable PowerPC VSX
+add_definitions(-DPNG_MIPS_MSA_OPT=0)         # Disable MIPS MSA
+add_definitions(-DPNG_MIPS_MMI_OPT=0)         # Disable MIPS MMI
+add_definitions(-DPNG_LOONGARCH_LSX_OPT=0)    # Disable LoongArch LSX
+add_definitions(-DPNG_RISCV_RVV_OPT=0)        # Disable RISC-V RVV
+
+# Enable WASM SIMD optimizations
+option(PNG_WASM_SIMD "Enable WASM SIMD optimizations" ON)
+if(PNG_WASM_SIMD)
+  add_definitions(-DPNG_WASM_SIMD_OPT=1)
+  message(STATUS "WASM SIMD optimizations enabled")
+else()
+  add_definitions(-DPNG_WASM_SIMD_OPT=0)
+  message(STATUS "WASM SIMD optimizations disabled")
+endif()
+
+# PRIORITY 1: zlib Integration
+# ============================
+# Use external zlib.wasm instead of bundling
+set(PNG_BUILD_ZLIB OFF CACHE BOOL "Don't build internal zlib for WASM" FORCE)
+
+# Find the shared zlib.wasm library
+find_package(ZLIB REQUIRED)
+if(NOT ZLIB_FOUND)
+  message(FATAL_ERROR "zlib.wasm not found. Please build and install zlib.wasm first.")
+endif()
+message(STATUS "Using external zlib.wasm: ${ZLIB_LIBRARIES}")
+
+set(PNG_LINK_LIBRARIES ZLIB::ZLIB)
+
+# PRIORITY 1: Emscripten-Specific Compiler Flags
+# ==============================================
+
+# Core WASM flags with maximum modern browser features
+set(WASM_CORE_FLAGS
+    -s WASM=1
+    -s MODULARIZE=1
+    -s EXPORT_ES6=1
+    -O3
+    -flto                         # Link-time optimization for maximum performance
+    --closure=1                   # Closure compiler for size optimization
+    -s ALLOW_MEMORY_GROWTH=1
+    -s "EXPORTED_RUNTIME_METHODS=['ccall','cwrap','FS','setValue','getValue']"
+)
+
+# Maximum WASM SIMD and modern features
+if(PNG_WASM_SIMD)
+  list(APPEND WASM_CORE_FLAGS
+    -msimd128                     # WASM SIMD instructions
+    -s SIMD=1                     # Enable SIMD support
+    -msse2                        # Additional SIMD optimizations via WASM SIMD
+    -msse3
+    -mssse3
+  )
+endif()
+
+# Aggressive memory configuration for native-level performance
+set(WASM_MEMORY_FLAGS
+    -s INITIAL_MEMORY=67108864    # 64MB initial (larger for professional workflows)
+    -s MAXIMUM_MEMORY=2147483648  # 2GB maximum (no artificial browser limits)
+    -s STACK_SIZE=2097152         # 2MB stack for complex operations
+    -s TOTAL_STACK=2097152        # Match stack allocation
+)
+
+# Advanced browser features and filesystem support
+set(WASM_ADVANCED_FLAGS
+    -s FORCE_FILESYSTEM=1
+    -s "EXTRA_EXPORTED_RUNTIME_METHODS=['FS','IDBFS','writeFile','readFile']"
+    # Modern browser APIs (require WebGPU+SIMD browsers only)
+    -s USE_PTHREADS=0             # Disable for SIDE_MODULE compatibility, enable in MAIN_MODULE
+    -s SHARED_MEMORY=0            # Disable for SIDE_MODULE, enable in MAIN_MODULE
+    -s ASYNCIFY=1                 # Enable async/await in C code
+    -s ASYNCIFY_STACK_SIZE=8192   # Stack for async operations
+    # Advanced Emscripten features
+    -s FETCH=1                    # Modern fetch API for network operations
+    -s WASM_BIGINT=1             # BigInt support for large numbers
+    -s DYNAMIC_EXECUTION=0        # Security: disable eval-like features
+    -s TEXTDECODER=2             # Fast text decoding
+    # Eliminate unnecessary runtime methods for smaller size
+    -s MINIMAL_RUNTIME=0          # Keep full runtime for flexibility
+)
+
+# Additional flags for MAIN_MODULE builds (threading-capable)
+set(WASM_MAIN_MODULE_FLAGS
+    -s USE_PTHREADS=1             # Enable threading for MAIN_MODULE
+    -s SHARED_MEMORY=1            # Enable SharedArrayBuffer
+    -s PTHREAD_POOL_SIZE=4        # Thread pool for parallel operations
+    -s PROXY_TO_PTHREAD=1         # Keep main thread responsive
+)
+
+# Build type detection and flag combination
+option(BUILD_SIDE_MODULE "Build as SIDE_MODULE for dynamic loading" OFF)
+option(BUILD_MAIN_MODULE "Build as MAIN_MODULE with threading" ON)
+
+# Combine flags based on build type
+if(BUILD_SIDE_MODULE)
+    # SIDE_MODULE: No threading, optimized for dlopen()
+    set(WASM_FLAGS ${WASM_CORE_FLAGS} ${WASM_MEMORY_FLAGS} ${WASM_ADVANCED_FLAGS})
+    list(APPEND WASM_FLAGS -s SIDE_MODULE=1)
+    list(APPEND WASM_FLAGS -s ERROR_ON_UNDEFINED_SYMBOLS=0)
+    message(STATUS "Building libpng.wasm as SIDE_MODULE")
+elseif(BUILD_MAIN_MODULE)
+    # MAIN_MODULE: Full features including threading
+    set(WASM_FLAGS ${WASM_CORE_FLAGS} ${WASM_MEMORY_FLAGS} ${WASM_ADVANCED_FLAGS} ${WASM_MAIN_MODULE_FLAGS})
+    list(APPEND WASM_FLAGS -s MAIN_MODULE=1)
+    message(STATUS "Building libpng.wasm as MAIN_MODULE with threading")
+else()
+    # Default standalone build
+    set(WASM_FLAGS ${WASM_CORE_FLAGS} ${WASM_MEMORY_FLAGS} ${WASM_ADVANCED_FLAGS})
+    message(STATUS "Building libpng.wasm as standalone module")
+endif()
+
+# Apply WASM flags to C and CXX compilers
+string(REPLACE ";" " " WASM_FLAGS_STR "${WASM_FLAGS}")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${WASM_FLAGS_STR}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${WASM_FLAGS_STR}")
+
+# Linker flags for WASM
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${WASM_FLAGS_STR}")
+set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${WASM_FLAGS_STR}")
+
+# PRIORITY 2: WASM SIMD Filter Implementation
+# ===========================================
+
+# WASM SIMD and optimization source files
+set(libpng_wasm_sources "")
+if(PNG_WASM_SIMD)
+  set(libpng_wasm_sources
+      wasm/wasm_init.c
+      wasm/filter_wasm_simd.c
+      wasm/wasm_memory.c
+      wasm/wasm_progressive.c
+      wasm/wasm_zlib.c
+      wasm/wasm_error.c
+  )
+endif()
+
+# Include the main libpng configuration for source files
+include(GNUInstallDirs)
+include(CheckCSourceCompiles)
+
+# Configuration header handling - use prebuilt for WASM
+set(PNG_LIBCONF_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/scripts/pnglibconf.h.prebuilt")
+if(NOT EXISTS "${PNG_LIBCONF_HEADER}")
+  message(FATAL_ERROR "pnglibconf.h.prebuilt not found. Required for WASM builds.")
+endif()
+
+configure_file("${PNG_LIBCONF_HEADER}"
+               "${CMAKE_CURRENT_BINARY_DIR}/pnglibconf.h"
+               @ONLY)
+add_custom_target(png_genfiles)
+
+# PRIORITY 1: Source Files Configuration
+# ======================================
+
+# Public headers
+set(libpng_public_hdrs
+    png.h
+    pngconf.h
+    "${CMAKE_CURRENT_BINARY_DIR}/pnglibconf.h"
+)
+
+# Private headers
+set(libpng_private_hdrs
+    pngpriv.h
+    pngdebug.h
+    pnginfo.h
+    pngstruct.h
+)
+
+# Core PNG sources (excluding all native SIMD)
+set(libpng_sources
+    ${libpng_public_hdrs}
+    ${libpng_private_hdrs}
+    png.c
+    pngerror.c
+    pngget.c
+    pngmem.c
+    pngpread.c
+    pngread.c
+    pngrio.c
+    pngrtran.c
+    pngrutil.c
+    pngset.c
+    pngtrans.c
+    pngwio.c
+    pngwrite.c
+    pngwtran.c
+    pngwutil.c
+    ${libpng_wasm_sources}  # Add WASM SIMD and optimization sources
+)
+
+# PRIORITY 1: Library Target Creation
+# ===================================
+
+if(PNG_STATIC)
+  add_library(png_static STATIC ${libpng_sources})
+  add_dependencies(png_static png_genfiles)
+
+  # Set proper WASM static library name
+  set_target_properties(png_static
+                        PROPERTIES OUTPUT_NAME "png16"
+                                   DEBUG_POSTFIX "d")
+
+  # Include directories
+  target_include_directories(png_static
+                             PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>"
+                             PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>"
+                             INTERFACE "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/libpng16>")
+
+  # Link with zlib.wasm
+  target_link_libraries(png_static PUBLIC ${PNG_LINK_LIBRARIES})
+
+  # Set as main PNG target
+  set(PNG_LIBRARY_TARGET png_static)
+
+  message(STATUS "Created static libpng.wasm target: png_static")
+endif()
+
+# PRIORITY 2: Memory Optimization Configuration
+# =============================================
+
+# Enable custom memory allocator support
+add_definitions(-DPNG_USER_MEM_SUPPORTED=1)
+
+# Enable setjmp/longjmp for error handling (WASM compatible)
+add_definitions(-DPNG_SETJMP_SUPPORTED=1)
+
+# Optimize for memory usage
+add_definitions(-DPNG_SAFE_LIMITS_SUPPORTED=1)
+
+# PRIORITY 2: Performance Optimizations
+# =====================================
+
+# Enable function pointer optimizations
+add_definitions(-DPNG_READ_SUPPORTED=1)
+add_definitions(-DPNG_WRITE_SUPPORTED=1)
+
+# Enable progressive decoding for streaming
+add_definitions(-DPNG_PROGRESSIVE_READ_SUPPORTED=1)
+
+# Optimize compression integration
+add_definitions(-DPNG_COMPRESSION_TYPE_SUPPORTED=1)
+
+# PRIORITY 1: Installation Configuration
+# ======================================
+
+if(PNG_STATIC AND NOT SKIP_INSTALL_LIBRARIES AND NOT SKIP_INSTALL_ALL)
+  install(TARGETS ${PNG_LIBRARY_TARGET}
+          EXPORT libpng-wasm
+          ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+endif()
+
+if(NOT SKIP_INSTALL_HEADERS AND NOT SKIP_INSTALL_ALL)
+  install(FILES ${libpng_public_hdrs}
+          DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+  install(FILES ${libpng_public_hdrs}
+          DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/libpng16")
+endif()
+
+# Export configuration for other WASM projects
+if(NOT SKIP_INSTALL_EXPORT AND NOT SKIP_INSTALL_ALL)
+  install(EXPORT libpng-wasm
+          DESTINATION "${CMAKE_INSTALL_LIBDIR}/libpng-wasm"
+          FILE libpng-wasm.cmake)
+endif()
+
+# Summary
+message(STATUS "")
+message(STATUS "libpng.wasm Configuration Summary:")
+message(STATUS "===================================")
+message(STATUS "Version: ${PROJECT_VERSION}")
+message(STATUS "Target Architecture: ${PNG_TARGET_ARCHITECTURE}")
+message(STATUS "WASM SIMD: ${PNG_WASM_SIMD}")
+message(STATUS "Static Library: ${PNG_STATIC}")
+message(STATUS "Shared Library: ${PNG_SHARED}")
+message(STATUS "zlib: External (${ZLIB_LIBRARIES})")
+message(STATUS "Memory Growth: Enabled")
+message(STATUS "Maximum Memory: 256MB")
+message(STATUS "File System: Enabled")
+message(STATUS "")

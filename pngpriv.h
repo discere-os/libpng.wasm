@@ -314,6 +314,26 @@
 #endif /* __riscv_v >= 1000000 && __riscv_v < 1900000 */
 #endif /* PNG_RISCV_RVV_OPT > 0 */
 
+/* WASM SIMD optimizations */
+#ifndef PNG_WASM_SIMD_OPT
+#  if defined(__EMSCRIPTEN__) && defined(__wasm_simd128__)
+     /* WASM SIMD is available when building with Emscripten and SIMD enabled */
+#    define PNG_WASM_SIMD_OPT 1
+#  else
+#    define PNG_WASM_SIMD_OPT 0
+#  endif
+#endif
+
+#if PNG_WASM_SIMD_OPT > 0
+#  define PNG_FILTER_OPTIMIZATIONS png_init_filter_functions_wasm_simd
+#  ifndef PNG_WASM_SIMD_IMPLEMENTATION
+     /* Use the intrinsics code by default */
+#    define PNG_WASM_SIMD_IMPLEMENTATION 1
+#  endif
+#else
+#  define PNG_WASM_SIMD_IMPLEMENTATION 0
+#endif /* PNG_WASM_SIMD_OPT > 0 */
+
 /* Is this a build of a DLL where compilation of the object modules requires
  * different preprocessor settings to those required for a simple library?  If
  * so PNG_BUILD_DLL must be set.
@@ -1563,6 +1583,166 @@ PNG_INTERNAL_FUNCTION(void,png_read_filter_row_paeth3_rvv,(png_row_infop
     row_info, png_bytep row, png_const_bytep prev_row),PNG_EMPTY);
 PNG_INTERNAL_FUNCTION(void,png_read_filter_row_paeth4_rvv,(png_row_infop
     row_info, png_bytep row, png_const_bytep prev_row),PNG_EMPTY);
+#endif
+
+#if PNG_WASM_SIMD_IMPLEMENTATION > 0
+PNG_INTERNAL_FUNCTION(void,png_read_filter_row_up_wasm_simd,(png_row_infop
+    row_info, png_bytep row, png_const_bytep prev_row),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(void,png_read_filter_row_sub3_wasm_simd,(png_row_infop
+    row_info, png_bytep row, png_const_bytep prev_row),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(void,png_read_filter_row_sub4_wasm_simd,(png_row_infop
+    row_info, png_bytep row, png_const_bytep prev_row),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(void,png_read_filter_row_sub6_wasm_simd,(png_row_infop
+    row_info, png_bytep row, png_const_bytep prev_row),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(void,png_read_filter_row_sub8_wasm_simd,(png_row_infop
+    row_info, png_bytep row, png_const_bytep prev_row),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(void,png_read_filter_row_avg3_wasm_simd,(png_row_infop
+    row_info, png_bytep row, png_const_bytep prev_row),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(void,png_read_filter_row_avg4_wasm_simd,(png_row_infop
+    row_info, png_bytep row, png_const_bytep prev_row),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(void,png_read_filter_row_avg6_wasm_simd,(png_row_infop
+    row_info, png_bytep row, png_const_bytep prev_row),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(void,png_read_filter_row_avg8_wasm_simd,(png_row_infop
+    row_info, png_bytep row, png_const_bytep prev_row),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(void,png_read_filter_row_paeth3_wasm_simd,(png_row_infop
+    row_info, png_bytep row, png_const_bytep prev_row),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(void,png_read_filter_row_paeth4_wasm_simd,(png_row_infop
+    row_info, png_bytep row, png_const_bytep prev_row),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(void,png_read_filter_row_paeth6_wasm_simd,(png_row_infop
+    row_info, png_bytep row, png_const_bytep prev_row),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(void,png_read_filter_row_paeth8_wasm_simd,(png_row_infop
+    row_info, png_bytep row, png_const_bytep prev_row),PNG_EMPTY);
+
+/* WASM SIMD initialization and utility functions */
+PNG_INTERNAL_FUNCTION(void,png_init_filter_functions_wasm_simd,(png_structp 
+    png_ptr, unsigned int bpp),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(int,png_wasm_simd_support,(void),PNG_EMPTY);
+
+/* WASM SIMD performance and capability structures */
+typedef struct png_wasm_simd_info_struct
+{
+   int simd_enabled;
+   int alignment_size;
+   int chunk_size;
+   int up_filter_optimized;
+   int sub_filter_optimized;
+   int avg_filter_optimized;
+   int paeth_filter_optimized;
+} png_wasm_simd_info;
+
+typedef png_wasm_simd_info * png_wasm_simd_infop;
+
+PNG_INTERNAL_FUNCTION(void,png_wasm_simd_get_performance_info,(png_structp
+    png_ptr, png_wasm_simd_infop simd_info),PNG_EMPTY);
+
+/* WASM Memory Management Functions */
+PNG_INTERNAL_FUNCTION(void,png_wasm_memory_init,(png_structp png_ptr),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(void,png_wasm_memory_cleanup,(png_structp png_ptr),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(void,png_wasm_optimize_heap,(png_structp png_ptr),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(png_voidp,png_wasm_malloc_progressive,(png_structp png_ptr,
+    png_alloc_size_t size, int progressive_pass),PNG_ALLOCATED);
+PNG_INTERNAL_FUNCTION(png_voidp,png_wasm_malloc_streaming,(png_structp png_ptr,
+    png_alloc_size_t size, png_uint_32 flags),PNG_ALLOCATED);
+
+/* WASM Memory Statistics */
+typedef struct png_wasm_memory_stats_struct
+{
+   png_size_t total_allocated;
+   png_size_t peak_allocated;
+   png_size_t large_alloc_count;
+   png_size_t small_alloc_count;
+   int active_pools;
+} png_wasm_memory_stats;
+
+PNG_INTERNAL_FUNCTION(void,png_wasm_memory_get_stats,(png_structp png_ptr,
+    png_wasm_memory_stats* stats),PNG_EMPTY);
+
+/* WASM Progressive Streaming Support */
+typedef struct png_wasm_progressive_context_struct png_wasm_progressive_context;
+
+typedef struct png_wasm_progressive_stats_struct
+{
+   png_uint_32 total_bytes_processed;
+   png_uint_32 current_row;
+   png_uint_32 total_rows;
+   png_uint_32 bytes_per_second;
+   float progress_percent;
+   png_wasm_memory_stats memory_usage;
+} png_wasm_progressive_stats;
+
+PNG_INTERNAL_FUNCTION(png_wasm_progressive_context*,png_wasm_progressive_create,
+   (png_structp png_ptr, png_infop info_ptr),PNG_ALLOCATED);
+PNG_INTERNAL_FUNCTION(int,png_wasm_progressive_read_init,
+   (png_wasm_progressive_context* context),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(int,png_wasm_progressive_read_chunk,
+   (png_wasm_progressive_context* context, png_const_bytep data, 
+    png_size_t length),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(int,png_wasm_progressive_read_complete,
+   (png_wasm_progressive_context* context),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(void,png_wasm_progressive_destroy,
+   (png_wasm_progressive_context* context),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(void,png_wasm_progressive_get_stats,
+   (png_wasm_progressive_context* context, 
+    png_wasm_progressive_stats* stats),PNG_EMPTY);
+
+/* WASM zlib Integration */
+typedef struct png_wasm_zlib_stats_struct
+{
+   png_uint_32 total_input;
+   png_uint_32 total_output;
+   int compression_level;
+   png_size_t buffer_input_size;
+   png_size_t buffer_output_size;
+   float compression_ratio;
+} png_wasm_zlib_stats;
+
+typedef struct png_wasm_zlib_params_struct
+{
+   int compression_level;
+   int window_bits;
+   int mem_level;
+   int strategy;
+   png_size_t buffer_size;
+   png_size_t chunk_size;
+} png_wasm_zlib_params;
+
+PNG_INTERNAL_FUNCTION(void,png_wasm_zlib_cleanup_buffer,(png_structp png_ptr),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(int,png_wasm_zlib_compress_init,(png_structp png_ptr, 
+   int level, int method, int window_bits, int mem_level, int strategy),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(int,png_wasm_zlib_decompress_init,(png_structp png_ptr, 
+   int window_bits),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(int,png_wasm_zlib_compress_chunk,(png_structp png_ptr, 
+   png_const_bytep input, png_size_t input_len, png_bytep output, 
+   png_size_t* output_len, int flush),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(int,png_wasm_zlib_decompress_chunk,(png_structp png_ptr, 
+   png_const_bytep input, png_size_t input_len, png_bytep output, 
+   png_size_t* output_len),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(void,png_wasm_zlib_get_stats,(png_structp png_ptr, 
+   png_wasm_zlib_stats* stats),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(void,png_wasm_zlib_optimize_params,(png_structp png_ptr, 
+   png_wasm_zlib_params* params),PNG_EMPTY);
+
+/* WASM Error Handling */
+typedef struct png_wasm_error_info_struct
+{
+   int has_error;
+   int error_count;
+   int warning_count;
+   int severity;
+   char message[512];
+} png_wasm_error_info;
+
+PNG_INTERNAL_FUNCTION(int,png_wasm_error_init,(png_structp png_ptr),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(void,png_wasm_error_handler,(png_structp png_ptr, 
+   png_const_charp error_message),PNG_NORETURN);
+PNG_INTERNAL_FUNCTION(void,png_wasm_warning_handler,(png_structp png_ptr, 
+   png_const_charp warning_message),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(int,png_wasm_setjmp,(png_structp png_ptr),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(void,png_wasm_clear_jmp_buf,(png_structp png_ptr),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(int,png_wasm_get_error_info,(png_structp png_ptr, 
+   png_wasm_error_info* error_info),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(void,png_wasm_clear_errors,(png_structp png_ptr),PNG_EMPTY);
+PNG_INTERNAL_FUNCTION(void,png_wasm_error_cleanup,(png_structp png_ptr),PNG_EMPTY);
 #endif
 
 /* Choose the best filter to use and filter the row data */
