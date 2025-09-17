@@ -1,6 +1,12 @@
-# @discere-os/libpng.wasm - PNG Processing for WebAssembly
+# @discere-os/libpng.wasm
 
-PNG image processing library compiled to WebAssembly with TypeScript interfaces. Based on libpng v1.6.44 with comprehensive WASM-native enhancements and dual MAIN_MODULE/SIDE_MODULE architecture.
+WebAssembly port of libpng - PNG image processing library with SIMD optimization and comprehensive TypeScript interface.
+
+[![CI/CD](https://github.com/discere-os/discere-nucleus/actions/workflows/libpng-wasm-ci.yml/badge.svg)](https://github.com/discere-os/discere-nucleus/actions)
+[![JSR](https://jsr.io/badges/@discere-os/libpng.wasm)](https://jsr.io/@discere-os/libpng.wasm)
+[![npm version](https://badge.fury.io/js/@discere-os%2Flibpng.wasm.svg)](https://badge.fury.io/js/@discere-os%2Flibpng.wasm)
+[![License](https://img.shields.io/badge/License-PNG-blue.svg)](LICENSE)
+[![Status](https://img.shields.io/badge/status-alpha-orange.svg)](https://github.com/discere-os/discere-nucleus)
 
 ## Features
 
