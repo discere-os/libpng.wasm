@@ -251,6 +251,13 @@ int png_wasm_encode_buffer(
     png_set_IHDR(png, info, width, height, 8, color_type,
                 PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
 
+    // Set compression parameters for better stability
+    png_set_compression_level(png, Z_DEFAULT_COMPRESSION);
+    png_set_compression_method(png, Z_DEFLATED);
+    png_set_compression_strategy(png, Z_DEFAULT_STRATEGY);
+    png_set_compression_window_bits(png, 15);
+    png_set_compression_mem_level(png, 8);
+
     // Write header
     png_write_info(png, info);
 
@@ -362,20 +369,46 @@ static void png_static_read_callback(png_structp png, png_bytep data, size_t len
 static void png_static_write_callback(png_structp png, png_bytep data, size_t length) {
     png_write_state_t* state = (png_write_state_t*)png_get_io_ptr(png);
 
+    // Validate state and input parameters
+    if (!state || !data || length == 0) {
+        png_error(png, "Invalid write callback parameters");
+        return;
+    }
+
+    // Prevent unreasonably large allocations (> 100MB for safety)
+    if (length > 100 * 1024 * 1024 || state->size > 100 * 1024 * 1024) {
+        png_error(png, "PNG output too large - possible corruption");
+        return;
+    }
+
+    // Check for integer overflow
+    if (state->size + length < state->size) {
+        png_error(png, "Size overflow in PNG write callback");
+        return;
+    }
+
     // Grow buffer if needed
     if (state->size + length > state->capacity) {
         size_t new_capacity = (state->capacity == 0) ? 8192 : state->capacity * 2;
         while (new_capacity < state->size + length) {
             new_capacity *= 2;
+            // Prevent runaway growth
+            if (new_capacity > 100 * 1024 * 1024) {
+                png_error(png, "PNG buffer grew too large - possible corruption");
+                return;
+            }
         }
 
-        state->buffer = (unsigned char*)realloc(state->buffer, new_capacity);
-        if (!state->buffer) {
-            png_error(png, "Memory allocation failed");
+        unsigned char* new_buffer = (unsigned char*)realloc(state->buffer, new_capacity);
+        if (!new_buffer) {
+            png_error(png, "Memory allocation failed in PNG write callback");
+            return;
         }
+        state->buffer = new_buffer;
         state->capacity = new_capacity;
     }
 
+    // Safe memory copy
     memcpy(state->buffer + state->size, data, length);
     state->size += length;
 }
