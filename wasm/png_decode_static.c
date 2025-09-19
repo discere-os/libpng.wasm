@@ -278,16 +278,28 @@ int png_wasm_encode_buffer(
     png_write_image(png, row_pointers);
     png_write_end(png, NULL);
 
+    // Validate output parameters before setting
+    if (!png_buffer || !png_size) {
+        free(row_pointers);
+        png_destroy_write_struct(&png, &info);
+        strncpy(last_error_msg, "Invalid output parameters", sizeof(last_error_msg)-1);
+        return 0;
+    }
+
     // Set output
     *png_buffer = write_state.buffer;
     *png_size = write_state.size;
+
+    // Debug output for troubleshooting
+    printf("✅ PNG encoded: %dx%d, %d channels, %zu bytes using static zlib\n",
+           width, height, channels, write_state.size);
+    printf("🔍 Debug: png_buffer=%p, png_size=%p, *png_size=%zu\n",
+           (void*)png_buffer, (void*)png_size, *png_size);
 
     // Cleanup
     free(row_pointers);
     png_destroy_write_struct(&png, &info);
 
-    printf("✅ PNG encoded: %dx%d, %d channels, %zu bytes using static zlib\n",
-           width, height, channels, write_state.size);
     return 1; // Success (non-zero for JavaScript truthiness)
 }
 

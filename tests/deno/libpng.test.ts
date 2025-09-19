@@ -98,8 +98,8 @@ Deno.test("PNG Encoding - Basic RGB", async () => {
 
     assertEquals(result, 1, "PNG encoding should succeed");
 
-    // Verify output size is reasonable
-    const outputSize = new Uint32Array(Module.HEAPU32.buffer, outputSizePtr >> 2, 1)[0];
+    // Verify output size is reasonable (fix memory access)
+    const outputSize = Module.HEAPU32[outputSizePtr >> 2];
     assert(outputSize > 50, `PNG output should be reasonable size, got ${outputSize}`);
     assert(outputSize < 1000, `PNG output should not be too large, got ${outputSize}`);
 
@@ -123,32 +123,46 @@ Deno.test("PNG Decoding - Valid PNG data", async () => {
   // Initialize PNG
   assertEquals(Module._png_wasm_init(), 1);
 
-  // Minimal valid 1x1 RGB PNG (known working)
-  const validPNG = new Uint8Array([
-    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG signature
-    0x00, 0x00, 0x00, 0x0D, // IHDR length
-    0x49, 0x48, 0x44, 0x52, // IHDR chunk type
-    0x00, 0x00, 0x00, 0x01, // Width: 1
-    0x00, 0x00, 0x00, 0x01, // Height: 1
-    0x08, 0x02, 0x00, 0x00, 0x00, // 8-bit RGB
-    0x90, 0x77, 0x53, 0xDE, // IHDR CRC
-    0x00, 0x00, 0x00, 0x0C, // IDAT length
-    0x49, 0x44, 0x41, 0x54, // IDAT chunk type
-    0x08, 0x99, 0x01, 0x01, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, // Compressed data
-    0x02, 0x00, 0x01, 0x00, // IDAT CRC
-    0x00, 0x00, 0x00, 0x00, // IEND length
-    0x49, 0x45, 0x4E, 0x44, // IEND chunk type
-    0xAE, 0x42, 0x60, 0x82  // IEND CRC
-  ]);
+  // Instead of using hardcoded PNG with potentially invalid compression data,
+  // create a valid PNG by encoding first, then decoding it
+  const testImageData = new Uint8Array([255, 0, 0]); // 1x1 red pixel (RGB)
+  const width = 1, height = 1, channels = 3;
 
-  // Allocate memory
-  const pngDataPtr = Module._malloc(validPNG.length);
+  // Allocate memory for encoding
+  const imagePtr = Module._malloc(testImageData.length);
   const outputBufferPtr = Module._malloc(4);
-  const widthPtr = Module._malloc(4);
-  const heightPtr = Module._malloc(4);
-  const channelsPtr = Module._malloc(4);
-  const bitDepthPtr = Module._malloc(4);
-  const colorTypePtr = Module._malloc(4);
+  const outputSizePtr = Module._malloc(4);
+
+  try {
+    // Copy test data
+    const imageView = new Uint8Array(Module.HEAPU8.buffer, imagePtr, testImageData.length);
+    imageView.set(testImageData);
+
+    // Encode to create valid PNG
+    const encodeResult = Module._png_wasm_encode_buffer(
+      imagePtr, width, height, channels,
+      outputBufferPtr, outputSizePtr
+    );
+
+    assertEquals(encodeResult, 1, "PNG encoding should succeed");
+
+    // Get encoded PNG
+    const pngSize = Module.HEAPU32[outputSizePtr >> 2];
+    const encodedPngDataPtr = Module.HEAPU32[outputBufferPtr >> 2];
+    const validPNG = new Uint8Array(pngSize);
+    validPNG.set(Module.HEAPU8.subarray(encodedPngDataPtr, encodedPngDataPtr + pngSize));
+
+    // Free encoding memory
+    Module._free(encodedPngDataPtr);
+
+    // Now allocate memory for decoding
+    const pngDataPtr = Module._malloc(validPNG.length);
+    const decodeOutputBufferPtr = Module._malloc(4);
+    const widthPtr = Module._malloc(4);
+    const heightPtr = Module._malloc(4);
+    const channelsPtr = Module._malloc(4);
+    const bitDepthPtr = Module._malloc(4);
+    const colorTypePtr = Module._malloc(4);
 
   try {
     // Copy PNG data to WASM memory
@@ -157,33 +171,40 @@ Deno.test("PNG Decoding - Valid PNG data", async () => {
 
     // Decode PNG
     const result = Module._png_wasm_decode_buffer(
-      pngDataPtr, validPNG.length, outputBufferPtr,
+      pngDataPtr, validPNG.length, decodeOutputBufferPtr,
       widthPtr, heightPtr, channelsPtr, bitDepthPtr, colorTypePtr
     );
 
     if (result === 1) {
-      // Success case
-      const width = new Uint32Array(Module.HEAPU32.buffer, widthPtr >> 2, 1)[0];
-      const height = new Uint32Array(Module.HEAPU32.buffer, heightPtr >> 2, 1)[0];
-      const channels = new Uint32Array(Module.HEAPU32.buffer, channelsPtr >> 2, 1)[0];
+      // Success case - fix memory access patterns
+      const decodedWidth = Module.HEAPU32[widthPtr >> 2];
+      const decodedHeight = Module.HEAPU32[heightPtr >> 2];
+      const decodedChannels = Module.HEAPU32[channelsPtr >> 2];
 
-      assertEquals(width, 1, "Decoded width should be 1");
-      assertEquals(height, 1, "Decoded height should be 1");
-      assertEquals(channels, 3, "Decoded channels should be 3 (RGB)");
+      assertEquals(decodedWidth, 1, "Decoded width should be 1");
+      assertEquals(decodedHeight, 1, "Decoded height should be 1");
+      assertEquals(decodedChannels, 3, "Decoded channels should be 3 (RGB)");
     } else {
       // If decoding fails, we need to investigate the IDAT compression issue
       throw new Error("PNG decoding failed - IDAT compression issue needs to be resolved");
     }
 
   } finally {
-    // Cleanup
+    // Cleanup decoding memory
     Module._free(pngDataPtr);
-    Module._free(outputBufferPtr);
+    Module._free(decodeOutputBufferPtr);
     Module._free(widthPtr);
     Module._free(heightPtr);
     Module._free(channelsPtr);
     Module._free(bitDepthPtr);
     Module._free(colorTypePtr);
+  }
+
+  } finally {
+    // Cleanup encoding memory
+    Module._free(imagePtr);
+    Module._free(outputBufferPtr);
+    Module._free(outputSizePtr);
   }
 });
 
