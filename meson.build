@@ -8,19 +8,23 @@ png_sources = files(
   'png.c','pngerror.c','pngget.c','pngmem.c','pngpread.c','pngread.c','pngrio.c','pngrtran.c','pngrutil.c','pngset.c','pngtrans.c','pngwio.c','pngwrite.c','pngwtran.c','pngwutil.c'
 )
 
-cargs = []
-if simd
-  cargs += ['-msimd128']
-endif
+cargs = ['-DPNG_WASM_SIMD_OPT=0']
+# SIMD temporarily disabled - causes filter corruption
+# if simd
+#   cargs += ['-msimd128']
+# endif
 
 # MAIN links to Emscripten zlib
 executable('libpng-main',
-  files('wasm/libpng_wasm_module.c') + png_sources,
+  files('wasm/libpng_wasm_module.c', 'wasm/wasm_init.c') + png_sources,
   include_directories: incs,
   c_args: cargs,
   link_args: [
     '-sUSE_ZLIB=1','-sWASM=1','-sMODULARIZE=1','-sEXPORT_ES6=1','-sEXPORT_NAME=LibpngModule',
-    '-sALLOW_MEMORY_GROWTH=1','-sNO_FILESYSTEM=1','-sEXPORTED_RUNTIME_METHODS=["cwrap","ccall","UTF8ToString"]','-O3','-flto'
+    '-sALLOW_MEMORY_GROWTH=1','-sNO_FILESYSTEM=1',
+    '-sEXPORTED_RUNTIME_METHODS=["cwrap","ccall","UTF8ToString"]',
+    '-sEXPORTED_FUNCTIONS=["_libpng_wasm_version","_png_wasm_get_version","_png_wasm_init","_png_wasm_get_simd_supported","_png_wasm_get_simd_capabilities","_png_wasm_get_last_error","_png_wasm_decode_buffer","_png_wasm_encode_buffer","_png_wasm_free_buffer","_malloc","_free"]',
+    '-O3','-flto'
   ],
   install: true,
   install_dir: get_option('bindir')
