@@ -31,9 +31,38 @@ shared_module('libpng-side',
   files('wasm/libpng_wasm_side.c') + png_sources,
   include_directories: incs,
   name_prefix: '',
+  name_suffix: 'wasm',
   c_args: cargs,
   link_args: ['-sSIDE_MODULE=2','-fPIC','-O3','-flto','-sERROR_ON_UNDEFINED_SYMBOLS=0','-sEXPORTED_FUNCTIONS=["_libpng_wasm_version"]'],
   install: true,
   install_dir: get_option('libdir')
+)
+
+# Static library for linking by dependent libraries
+png_lib = static_library('png',
+  png_sources,
+  include_directories: incs,
+  c_args: cargs,
+  install: true,
+  install_dir: get_option('libdir')
+)
+
+# Install headers for dependency chain
+install_headers(
+  'png.h',
+  'pngconf.h',
+  'pnglibconf.h',
+  subdir: '.'
+)
+
+# Generate and install pkg-config file
+pkg = import('pkgconfig')
+pkg.generate(
+  name: 'libpng',
+  description: 'PNG library',
+  version: meson.project_version(),
+  libraries: '-lpng',
+  requires: 'zlib',
+  subdirs: '.'
 )
 
