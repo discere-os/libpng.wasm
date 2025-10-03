@@ -1,0 +1,32 @@
+{
+  "wasm:zlib": {
+    "version": "^1.3.0",
+    "symbols": {
+      "required": [
+        "deflate",
+        "inflate",
+        "crc32",
+        "deflateInit2_",
+        "inflateInit2_",
+        "deflateEnd",
+        "inflateEnd"
+      ]
+    },
+    "loading": "eager",
+    "fallback": null
+  },
+  "wasm:libc": {
+    "version": "*",
+    "symbols": {
+      "required": [
+        "malloc",
+        "free",
+        "memcpy",
+        "memset",
+        "strcmp"
+      ]
+    },
+    "loading": "eager",
+    "fallback": null
+  }
+}
