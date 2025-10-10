@@ -38,11 +38,11 @@ jobs:
         with:
           repository: discere-os/zlib.wasm
           ref: wasm
-          path: ../zlib.wasm
+          path: zlib.wasm
 
       - name: Build zlib.wasm dependency
         run: |
-          cd ../zlib.wasm
+          cd zlib.wasm
           chmod +x ./build-dual.sh
           ./build-dual.sh side
 
@@ -169,11 +169,11 @@ jobs:
         with:
           repository: discere-os/zlib.wasm
           ref: wasm
-          path: ../zlib.wasm
+          path: zlib.wasm
 
       - name: Build zlib.wasm dependency
         run: |
-          cd ../zlib.wasm
+          cd zlib.wasm
           chmod +x ./build-dual.sh
           ./build-dual.sh side
 
