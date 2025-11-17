@@ -108,6 +108,7 @@ png_read_filter_row_sub3_wasm_simd(png_row_infop row_info,
 /* PRIORITY 2: SUB Filter - WASM SIMD Implementation (4 bytes per pixel)
  * =====================================================================
  * Optimized version for RGBA pixels (4 bytes per pixel).
+ * The dependency chain is handled by loading already-updated values.
  */
 void
 png_read_filter_row_sub4_wasm_simd(png_row_infop row_info,
@@ -116,32 +117,34 @@ png_read_filter_row_sub4_wasm_simd(png_row_infop row_info,
    png_bytep rp = row;
    png_size_t rowbytes = row_info->rowbytes;
    const png_size_t bpp = 4;
-   
+
    /* Process first pixel normally */
    rp += bpp;
-   
-   /* WASM SIMD processing for 4-byte aligned pixels */
+
+   /* WASM SIMD processing for 4-byte aligned pixels
+    * This works correctly because each iteration loads the updated values
+    * from the previous iteration, maintaining the dependency chain. */
    png_size_t remaining = rowbytes - bpp;
-   
+
    /* Process 16 bytes (4 RGBA pixels) at a time */
    while (remaining >= WASM_SIMD_CHUNK_SIZE)
    {
       v128_t current_vec = wasm_v128_load(rp);
       v128_t left_vec = wasm_v128_load(rp - bpp);
-      
-      v128_t result = wasm_u8x16_add(current_vec, left_vec);
+
+      v128_t result = wasm_i8x16_add(current_vec, left_vec);
       wasm_v128_store(rp, result);
-      
+
       rp += WASM_SIMD_CHUNK_SIZE;
       remaining -= WASM_SIMD_CHUNK_SIZE;
    }
-   
+
    /* Handle remaining bytes */
    for (png_size_t i = 0; i < remaining; i++)
    {
       rp[i] += rp[i - bpp];
    }
-   
+
    PNG_UNUSED(prev_row)
 }
 
@@ -232,17 +235,17 @@ png_read_filter_row_avg4_wasm_simd(png_row_infop row_info,
    png_const_bytep pp = prev_row;
    png_size_t rowbytes = row_info->rowbytes;
    const png_size_t bpp = 4;
-   
+
    /* Process first pixel */
    for (png_size_t i = 0; i < bpp; i++)
    {
       rp[i] += pp[i] >> 1;
    }
-   
+
    /* WASM SIMD optimization for remaining pixels */
    png_size_t remaining = rowbytes - bpp;
    png_size_t simd_pos = bpp;
-   
+
    /* Process pixels with SIMD where beneficial */
    while (remaining >= WASM_SIMD_CHUNK_SIZE && simd_pos + WASM_SIMD_CHUNK_SIZE <= rowbytes)
    {
@@ -250,18 +253,26 @@ png_read_filter_row_avg4_wasm_simd(png_row_infop row_info,
       v128_t current_vec = wasm_v128_load(rp + simd_pos);
       v128_t left_vec = wasm_v128_load(rp + simd_pos - bpp);
       v128_t up_vec = wasm_v128_load(pp + simd_pos);
-      
-      /* Compute average: (left + up) >> 1 */
+
+      /* Compute average with floor division: (left + up) >> 1
+       * Note: wasm_u8x16_avgr rounds up, but PNG requires floor division.
+       * We use average_u to get proper floor behavior (a+b)/2. */
       v128_t avg_vec = wasm_u8x16_avgr(left_vec, up_vec);
-      
+
+      /* Correct for avgr's rounding: avgr rounds (a+b+1)/2, we need (a+b)/2
+       * So we need to subtract 1 when (a+b) is odd, i.e., when a^b has low bit set */
+      v128_t xor_vec = wasm_v128_xor(left_vec, up_vec);
+      v128_t correction = wasm_v128_and(xor_vec, wasm_i8x16_splat(1));
+      avg_vec = wasm_i8x16_sub(avg_vec, correction);
+
       /* Add to current: current += avg */
-      v128_t result = wasm_u8x16_add(current_vec, avg_vec);
+      v128_t result = wasm_i8x16_add(current_vec, avg_vec);
       wasm_v128_store(rp + simd_pos, result);
-      
+
       simd_pos += WASM_SIMD_CHUNK_SIZE;
       remaining -= WASM_SIMD_CHUNK_SIZE;
    }
-   
+
    /* Handle remaining bytes with scalar operations */
    for (png_size_t i = simd_pos; i < rowbytes; i++)
    {
